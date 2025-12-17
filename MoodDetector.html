@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Face Mood Detector — All Moods</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;font-family:'Inter',sans-serif;background:#0f172a;color:#f1f5f9;padding:20px;}
+  h1{margin:0;font-size:22px}
+  .app{max-width:950px;margin:auto;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .panel{background:#1e293b;padding:16px;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,0.4)}
+  video{width:100%;border-radius:12px;background:black;transform:scaleX(-1)}
+  canvas{position:absolute;top:0;left:0;transform:scaleX(-1)}
+  .video-wrap{position:relative}
+  .mood-card{padding:16px;border-radius:12px;text-align:center}
+  .mood-icon{font-size:64px;margin:10px 0}
+  .happy{background:linear-gradient(135deg,#fde047,#facc15);color:#1a1a00}
+  .sad{background:linear-gradient(135deg,#60a5fa,#2563eb);color:#fff}
+  .neutral{background:linear-gradient(135deg,#cbd5e1,#94a3b8);color:#0f172a}
+  .angry{background:linear-gradient(135deg,#f87171,#dc2626);color:#fff}
+  .fearful{background:linear-gradient(135deg,#a78bfa,#6d28d9);color:#fff}
+  .disgusted{background:linear-gradient(135deg,#34d399,#059669);color:#fff}
+  .surprised{background:linear-gradient(135deg,#fbbf24,#d97706);color:#1a1a00}
+  ul{padding-left:18px;text-align:left}
+  footer{text-align:center;margin-top:20px;color:#94a3b8;font-size:13px}
+  footer strong{color:#facc15}
+  @media(max-width:780px){.app{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>Face Mood Detector</h1>
+  <p>Detects all moods: Neutral, Happy, Sad, Angry, Fearful, Disgusted, Surprised.</p>
+
+  <div class="app">
+    <div class="panel">
+      <div class="video-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <p id="status">Models not loaded</p>
+      <button id="startBtn">Start Detection</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+
+    <div id="moodCard" class="mood-card neutral">
+      <div class="mood-icon" id="moodIcon">😐</div>
+      <h2 id="moodTitle">Neutral</h2>
+      <p id="moodQuote">Waiting for detection...</p>
+      <ul id="moodSuggestions"></ul>
+    </div>
+  </div>
+
+  <footer>
+    Built with face-api.js • Supports 7 moods <br>
+    <strong>Made by Aaryan Anand Mudvikar</strong>
+  </footer>
+
+<script defer src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script>
+const video=document.getElementById('video');
+const overlay=document.getElementById('overlay');
+const startBtn=document.getElementById('startBtn');
+const stopBtn=document.getElementById('stopBtn');
+const statusEl=document.getElementById('status');
+const moodCard=document.getElementById('moodCard');
+const moodIcon=document.getElementById('moodIcon');
+const moodTitle=document.getElementById('moodTitle');
+const moodQuote=document.getElementById('moodQuote');
+const moodSuggestions=document.getElementById('moodSuggestions');
+
+let stream=null, detectionInterval=null;
+
+const DATA={
+  neutral:{icon:'😐',quote:'Stay calm and carry on.',sug:['Focus on your tasks','Take a mindful breath','Enjoy the moment']},
+  happy:{icon:'😄',quote:'Happiness is contagious — share it!',sug:['Play your favorite music','Call a friend','Write down 3 gratitudes']},
+  sad:{icon:'😔',quote:'It’s okay to not feel okay — take it slow.',sug:['Listen to calming sounds','Take a walk','Talk to someone you trust']},
+  angry:{icon:'😠',quote:'Anger is a valid emotion — manage it wisely.',sug:['Take deep breaths','Step away from triggers','Write down your feelings']},
+  fearful:{icon:'😨',quote:'Fear is temporary — courage lasts.',sug:['Talk it out','Practice grounding','Remind yourself you are safe']},
+  disgusted:{icon:'🤢',quote:'Even bad experiences teach us something.',sug:['Step into fresh air','Refocus attention','Do something you enjoy']},
+  surprised:{icon:'😲',quote:'Life is full of surprises — embrace them.',sug:['Smile at the unexpected','Share the moment','Stay curious']}
+};
+
+function updateMoodUI(mood,conf){
+  moodCard.className='mood-card '+mood;
+  moodIcon.textContent=DATA[mood].icon;
+  moodTitle.textContent=mood.charAt(0).toUpperCase()+mood.slice(1)+` (${(conf*100).toFixed(0)}%)`;
+  moodQuote.textContent=DATA[mood].quote;
+  moodSuggestions.innerHTML='';
+  DATA[mood].sug.forEach(s=>{
+    const li=document.createElement('li');li.textContent=s;moodSuggestions.appendChild(li);
+  });
+}
+
+async function loadModels(){
+  statusEl.textContent='Loading models...';
+  const MODEL_URL='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+  statusEl.textContent='Models loaded';
+}
+
+async function startCamera(){
+  stream=await navigator.mediaDevices.getUserMedia({video:true});
+  video.srcObject=stream;
+  await video.play();
+  overlay.width=video.videoWidth;overlay.height=video.videoHeight;
+}
+
+function stopCamera(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  if(detectionInterval){clearInterval(detectionInterval);detectionInterval=null;}
+  statusEl.textContent='Camera stopped';
+}
+
+function startDetectionLoop(){
+  detectionInterval=setInterval(async()=>{
+    if(video.readyState<2) return;
+    const options=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
+    const res=await faceapi.detectSingleFace(video,options).withFaceExpressions();
+    const ctx=overlay.getContext('2d');
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    if(res){
+      const resized=faceapi.resizeResults(res,{width:overlay.width,height:overlay.height});
+      const box=resized.detection.box;
+      ctx.strokeStyle='lime';ctx.lineWidth=2;ctx.strokeRect(box.x,box.y,box.width,box.height);
+      const expr=res.expressions;
+      let best=Object.keys(expr).reduce((a,b)=>expr[a]>expr[b]?a:b);
+      updateMoodUI(best,expr[best]);
+      statusEl.textContent='Detecting...';
+    } else {
+      updateMoodUI('neutral',0);
+      statusEl.textContent='No face detected';
+    }
+  },700);
+}
+
+startBtn.onclick=async()=>{await loadModels();await startCamera();startDetectionLoop();};
+stopBtn.onclick=()=>{stopCamera();};
+</script>
+</body>
+</html>
